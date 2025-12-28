@@ -5,9 +5,16 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "start:prod": "NODE_ENV=production node server.js",
     "dev": "nodemon server.js",
+    "dev:watch": "NODE_ENV=development nodemon --inspect server.js",
     "test": "echo \"Error: no test specified\" && exit 0",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "health-check": "node -e \"require('http').get('http://localhost:3000/health', (res) => { res.on('data', d => console.log(d.toString())); })\"",
+    "zo:deploy": "zo deploy",
+    "zo:logs": "zo logs",
+    "zo:status": "zo status"
   },
   "keywords": [
     "twitter",
@@ -17,7 +24,9 @@
     "api",
     "scraper",
     "no-api-key",
-    "tweet-fetcher"
+    "tweet-fetcher",
+    "zo",
+    "production-ready"
   ],
   "author": "Toma Itagaki",
   "license": "MIT",
@@ -40,7 +49,8 @@
     "cors": "^2.8.5",
     "helmet": "^7.1.0",
     "morgan": "^1.10.0",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "express-rate-limit": "^7.1.5"
   },
   "devDependencies": {
     "nodemon": "^3.0.2",

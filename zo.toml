@@ -1,0 +1,62 @@
+[build]
+# Build configuration for Zo hosting
+command = "npm install"
+
+[start]
+# Start command for the application
+command = "npm run start:prod"
+
+[env]
+# Environment configuration
+NODE_ENV = "production"
+
+[health]
+# Health check configuration
+path = "/health"
+interval = 30
+timeout = 10
+
+[resources]
+# Resource allocation
+memory = "512MB"
+cpu = "0.5"
+
+[scaling]
+# Auto-scaling configuration
+min_instances = 1
+max_instances = 5
+target_cpu = 70
+target_memory = 80
+
+[network]
+# Network configuration
+port = 3000
+protocol = "http"
+
+[logging]
+# Logging configuration
+level = "info"
+format = "json"
+
+[monitoring]
+# Monitoring and alerts
+enabled = true
+metrics = true
+tracing = false
+
+[deployment]
+# Deployment settings
+strategy = "rolling"
+max_unavailable = 0
+max_surge = 1
+
+[cache]
+# Response caching
+enabled = true
+ttl = 300
+
+[security]
+# Security settings
+rate_limiting = true
+helmet = true
+cors = true

@@ -4,17 +4,45 @@ const cheerio = require('cheerio');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const NITTER_INSTANCE = process.env.NITTER_INSTANCE || 'nitter.poast.org';
+const NODE_ENV = process.env.NODE_ENV || 'development';
+
+// Rate limiting configuration for production
+const limiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
+  message: {
+    success: false,
+    error: 'Too many requests from this IP, please try again later.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => NODE_ENV !== 'production' // Skip rate limiting in development
+});
 
 // Middleware
 app.use(helmet());
-app.use(cors());
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || '*',
+  credentials: true
+}));
 app.use(express.json());
-app.use(morgan('combined'));
+app.use(morgan(process.env.LOG_FORMAT || 'combined'));
+
+// Apply rate limiting to API endpoints
+app.use('/fetch', limiter);
+app.use('/mcp', limiter);
+
+// Request timeout middleware
+app.use((req, res, next) => {
+  req.setTimeout(parseInt(process.env.REQUEST_TIMEOUT) || 10000);
+  next();
+});
 
 /**
  * Transform X/Twitter URL to Nitter URL
@@ -107,7 +135,21 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    nitterInstance: NITTER_INSTANCE
+    nitterInstance: NITTER_INSTANCE,
+    environment: NODE_ENV,
+    uptime: process.uptime(),
+    memory: process.memoryUsage()
+  });
+});
+
+/**
+ * Readiness check endpoint for Zo platform
+ */
+app.get('/ready', (req, res) => {
+  // Add any additional checks here (database, external services, etc.)
+  res.json({
+    ready: true,
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -119,8 +161,10 @@ app.get('/', (req, res) => {
     name: 'X Link Fetcher',
     version: '1.0.0',
     description: 'Transform X/Twitter URLs to Nitter and fetch tweet content without API keys',
+    environment: NODE_ENV,
     endpoints: {
       health: '/health',
+      ready: '/ready',
       fetch: '/fetch?url=<twitter_url>',
       transform: '/transform?url=<twitter_url>',
       mcp: '/mcp (POST)'
@@ -284,11 +328,51 @@ app.use((req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`✨ X Link Fetcher server running on port ${PORT}`);
   console.log(`📍 Using Nitter instance: ${NITTER_INSTANCE}`);
+  console.log(`🌍 Environment: ${NODE_ENV}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
   console.log(`📖 API docs: http://localhost:${PORT}/`);
+});
+
+// Graceful shutdown handling
+const gracefulShutdown = (signal) => {
+  console.log(`\n${signal} received. Starting graceful shutdown...`);
+  
+  // Stop accepting new connections
+  server.close(() => {
+    console.log('✅ HTTP server closed');
+    
+    // Close database connections, cleanup resources, etc.
+    // Add any cleanup logic here
+    
+    console.log('✅ Graceful shutdown completed');
+    process.exit(0);
+  });
+  
+  // Force shutdown after timeout
+  const shutdownTimeout = parseInt(process.env.SHUTDOWN_TIMEOUT) || 30000;
+  setTimeout(() => {
+    console.error('⚠️  Forced shutdown due to timeout');
+    process.exit(1);
+  }, shutdownTimeout);
+};
+
+// Listen for shutdown signals
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error);
+  gracefulShutdown('UNCAUGHT_EXCEPTION');
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  gracefulShutdown('UNHANDLED_REJECTION');
 });
 
 module.exports = app;
