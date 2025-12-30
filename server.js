@@ -284,25 +284,86 @@ function createMcpServer() {
     version: '1.0.0'
   });
 
-  // Register tools
-  server.tool('fetch_tweet', 'Fetch and parse tweet content from X/Twitter URL', {
-    url: { type: 'string', description: 'X/Twitter URL to fetch' }
-  }, async ({ url }) => {
-    const nitterUrl = transformToNitter(url);
-    const content = await fetchTweetContent(nitterUrl);
-    return {
-      content: [{ type: 'text', text: JSON.stringify(content, null, 2) }]
-    };
-  });
+  // Register tools with proper JSON Schema format
+  server.tool(
+    'fetch_tweet',
+    'Fetch and parse tweet content from X/Twitter URL',
+    {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'X/Twitter URL to fetch' }
+      },
+      required: ['url']
+    },
+    async (args) => {
+      console.log('fetch_tweet called with:', JSON.stringify(args));
+      const url = args.url;
 
-  server.tool('transform_url', 'Transform X/Twitter URL to Nitter URL', {
-    url: { type: 'string', description: 'X/Twitter URL to transform' }
-  }, async ({ url }) => {
-    const nitterUrl = transformToNitter(url);
-    return {
-      content: [{ type: 'text', text: JSON.stringify({ originalUrl: url, nitterUrl }, null, 2) }]
-    };
-  });
+      if (!url) {
+        console.error('URL is undefined! Args received:', JSON.stringify(args));
+        return {
+          content: [{ type: 'text', text: 'Error: URL parameter is required' }],
+          isError: true
+        };
+      }
+
+      try {
+        console.log('Transforming URL:', url);
+        const nitterUrl = transformToNitter(url);
+        console.log('Fetching from Nitter URL:', nitterUrl);
+        const content = await fetchTweetContent(nitterUrl);
+        console.log('Successfully fetched content');
+        return {
+          content: [{ type: 'text', text: JSON.stringify(content, null, 2) }]
+        };
+      } catch (error) {
+        console.error('fetch_tweet error:', error.stack || error.message);
+        return {
+          content: [{ type: 'text', text: `Error: ${error.message}` }],
+          isError: true
+        };
+      }
+    }
+  );
+
+  server.tool(
+    'transform_url',
+    'Transform X/Twitter URL to Nitter URL',
+    {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'X/Twitter URL to transform' }
+      },
+      required: ['url']
+    },
+    async (args) => {
+      console.log('transform_url called with:', JSON.stringify(args));
+      const url = args.url;
+
+      if (!url) {
+        console.error('URL is undefined! Args received:', JSON.stringify(args));
+        return {
+          content: [{ type: 'text', text: 'Error: URL parameter is required' }],
+          isError: true
+        };
+      }
+
+      try {
+        console.log('Transforming URL:', url);
+        const nitterUrl = transformToNitter(url);
+        console.log('Transformed to:', nitterUrl);
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ originalUrl: url, nitterUrl }, null, 2) }]
+        };
+      } catch (error) {
+        console.error('transform_url error:', error.stack || error.message);
+        return {
+          content: [{ type: 'text', text: `Error: ${error.message}` }],
+          isError: true
+        };
+      }
+    }
+  );
 
   return server;
 }
@@ -311,6 +372,9 @@ function createMcpServer() {
 // This is compatible with the MCP 2025-06-18 Streamable HTTP transport spec
 app.all('/sse', async (req, res) => {
   console.log(`Received ${req.method} request to /sse`);
+  if (req.method === 'POST' && req.body) {
+    console.log('POST /sse body:', JSON.stringify(req.body, null, 2));
+  }
 
   try {
     // Check for existing session ID (from header, as per Streamable HTTP spec)
