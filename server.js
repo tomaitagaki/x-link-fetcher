@@ -12,7 +12,7 @@ const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { SSEServerTransport } = require('@modelcontextprotocol/sdk/server/sse.js');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 5001;
 const NITTER_INSTANCE = process.env.NITTER_INSTANCE || 'nitter.poast.org';
 
 // Middleware
