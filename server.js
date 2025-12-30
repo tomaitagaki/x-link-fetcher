@@ -5,6 +5,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const crypto = require('crypto');
+const { z } = require('zod');
 require('dotenv').config();
 
 // MCP SDK imports for Streamable HTTP transport
@@ -284,23 +285,18 @@ function createMcpServer() {
     version: '1.0.0'
   });
 
-  // Register tools with proper JSON Schema format
+  // Register tools with Zod schemas (MCP SDK v1.x expects Zod, not raw JSON Schema)
   server.tool(
     'fetch_tweet',
     'Fetch and parse tweet content from X/Twitter URL',
     {
-      type: 'object',
-      properties: {
-        url: { type: 'string', description: 'X/Twitter URL to fetch' }
-      },
-      required: ['url']
+      url: z.string().describe('X/Twitter URL to fetch (e.g., https://x.com/user/status/123)')
     },
-    async (args) => {
-      console.log('fetch_tweet called with:', JSON.stringify(args));
-      const url = args.url;
+    async ({ url }) => {
+      console.log('fetch_tweet called with url:', url);
 
       if (!url) {
-        console.error('URL is undefined! Args received:', JSON.stringify(args));
+        console.error('URL is undefined!');
         return {
           content: [{ type: 'text', text: 'Error: URL parameter is required' }],
           isError: true
@@ -330,18 +326,13 @@ function createMcpServer() {
     'transform_url',
     'Transform X/Twitter URL to Nitter URL',
     {
-      type: 'object',
-      properties: {
-        url: { type: 'string', description: 'X/Twitter URL to transform' }
-      },
-      required: ['url']
+      url: z.string().describe('X/Twitter URL to transform (e.g., https://x.com/user/status/123)')
     },
-    async (args) => {
-      console.log('transform_url called with:', JSON.stringify(args));
-      const url = args.url;
+    async ({ url }) => {
+      console.log('transform_url called with url:', url);
 
       if (!url) {
-        console.error('URL is undefined! Args received:', JSON.stringify(args));
+        console.error('URL is undefined!');
         return {
           content: [{ type: 'text', text: 'Error: URL parameter is required' }],
           isError: true
