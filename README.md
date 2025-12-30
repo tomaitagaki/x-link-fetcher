@@ -1,9 +1,11 @@
 # X Link Fetcher
 
+
 > Transform X/Twitter URLs to Nitter and fetch tweet content without API keys. Works as an MCP server for Poke.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+
+![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)
 
 ## Features
 
@@ -33,7 +35,7 @@ npm install
 npm start
 ```
 
-The server will start on `http://localhost:3000`
+The server will start on `http://localhost:5001`
 
 ### Development Mode
 
@@ -68,7 +70,9 @@ curl "http://localhost:3000/fetch?url=https://x.com/user/status/1234567890"
 
 ### As an MCP Server
 
-Add to your Poke configuration file (`~/.poke/config.json` or similar):
+
+
+Add to your Poke configuration file (`file ~/.poke/config.json` or similar):
 
 ```json
 {
@@ -101,9 +105,11 @@ Or if running remotely:
 Fetch and parse tweet content.
 
 **Query Parameters:**
+
 - `url` (required) - X/Twitter URL to fetch
 
 **Example:**
+
 ```bash
 GET /fetch?url=https://x.com/elonmusk/status/1234567890
 ```
@@ -113,14 +119,17 @@ GET /fetch?url=https://x.com/elonmusk/status/1234567890
 Transform X/Twitter URL to Nitter URL without fetching.
 
 **Query Parameters:**
+
 - `url` (required) - X/Twitter URL to transform
 
 **Example:**
+
 ```bash
 GET /transform?url=https://x.com/user/status/123
 ```
 
 **Response:**
+
 ```json
 {
   "originalUrl": "https://x.com/user/status/123",
@@ -133,6 +142,7 @@ GET /transform?url=https://x.com/user/status/123
 MCP server endpoint for Poke integration.
 
 **Body:**
+
 ```json
 {
   "method": "fetch_tweet",
@@ -147,6 +157,7 @@ MCP server endpoint for Poke integration.
 Health check endpoint.
 
 **Response:**
+
 ```json
 {
   "status": "ok",
@@ -158,7 +169,7 @@ Health check endpoint.
 
 ### Deploy to Vercel
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/tomaitagaki/x-link-fetcher)
+![Deploy with Vercel](https://vercel.com/button)
 
 ```bash
 # Install Vercel CLI
@@ -170,7 +181,7 @@ vercel
 
 ### Deploy to Railway
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template)
+![Deploy on Railway](https://railway.app/button.svg)
 
 1. Connect your GitHub repository
 2. Railway will auto-detect the Node.js app
@@ -229,6 +240,7 @@ Or in your deployment platform's environment variables.
 ## How It Works
 
 1. **URL Transformation**: Converts X/Twitter URLs to Nitter URLs
+
    - `x.com` → `nitter.poast.org`
    - `twitter.com` → `nitter.poast.org`
 
@@ -299,6 +311,7 @@ npm start
 ### Rate Limiting
 
 Nitter instances may rate limit. Consider:
+
 - Using your own Nitter instance
 - Implementing caching
 - Adding delays between requests
@@ -306,6 +319,7 @@ Nitter instances may rate limit. Consider:
 ### Parsing Errors
 
 If tweet content can't be parsed:
+
 - The tweet may be deleted or private
 - Nitter's HTML structure may have changed
 - Try a different Nitter instance
@@ -314,7 +328,7 @@ If tweet content can't be parsed:
 
 ### Project Structure
 
-```
+```markdown
 x-link-fetcher/
 ├── server.js           # Main Express server
 ├── package.json        # Dependencies and scripts
