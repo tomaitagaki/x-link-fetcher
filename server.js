@@ -7,9 +7,10 @@ const morgan = require('morgan');
 const crypto = require('crypto');
 require('dotenv').config();
 
-// MCP SDK imports for SSE endpoint
+// MCP SDK imports for Streamable HTTP transport
 const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
-const { SSEServerTransport } = require('@modelcontextprotocol/sdk/server/sse.js');
+const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
+const { isInitializeRequest } = require('@modelcontextprotocol/sdk/types.js');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -128,9 +129,8 @@ app.get('/', (req, res) => {
       health: '/health',
       fetch: '/fetch?url=<twitter_url>',
       transform: '/transform?url=<twitter_url>',
-      mcp: '/mcp (POST)',
-      sse: '/sse (GET) - MCP SSE endpoint for Poke integration',
-      messages: '/messages (POST) - SSE client-to-server messages'
+      mcp: '/mcp (POST) - Legacy MCP endpoint',
+      sse: '/sse (GET/POST) - Streamable HTTP MCP endpoint for Poke integration'
     },
     repository: 'https://github.com/tomaitagaki/x-link-fetcher',
     documentation: 'https://github.com/tomaitagaki/x-link-fetcher#readme'
@@ -273,7 +273,7 @@ app.post('/mcp', async (req, res) => {
   }
 });
 
-// MCP SSE endpoint for Poke integration
+// MCP Streamable HTTP transport for Poke integration
 // Store active transports by session ID
 const transports = new Map();
 
@@ -307,44 +307,98 @@ function createMcpServer() {
   return server;
 }
 
-// SSE endpoint - GET establishes SSE connection, POST sends messages
-app.get('/sse', (req, res) => {
-  // Use /sse as the message endpoint (Poke posts to same path)
-  const transport = new SSEServerTransport('/sse', res);
-  const server = createMcpServer();
+// Streamable HTTP endpoint - handles both GET and POST on /sse
+// This is compatible with the MCP 2025-06-18 Streamable HTTP transport spec
+app.all('/sse', async (req, res) => {
+  console.log(`Received ${req.method} request to /sse`);
 
-  const sessionId = crypto.randomUUID();
-  transports.set(sessionId, transport);
+  try {
+    // Check for existing session ID (from header, as per Streamable HTTP spec)
+    const sessionId = req.headers['mcp-session-id'];
+    let transport;
 
-  res.on('close', () => {
-    transports.delete(sessionId);
+    if (sessionId && transports.has(sessionId)) {
+      // Reuse existing transport for this session
+      transport = transports.get(sessionId);
+    } else if (!sessionId && req.method === 'POST' && isInitializeRequest(req.body)) {
+      // New session - create transport for initialization request
+      transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => crypto.randomUUID(),
+        onsessioninitialized: (newSessionId) => {
+          console.log(`Session initialized with ID: ${newSessionId}`);
+          transports.set(newSessionId, transport);
+        }
+      });
+
+      // Clean up transport when closed
+      transport.onclose = () => {
+        const sid = transport.sessionId;
+        if (sid && transports.has(sid)) {
+          console.log(`Transport closed for session ${sid}`);
+          transports.delete(sid);
+        }
+      };
+
+      // Connect the transport to a new MCP server
+      const server = createMcpServer();
+      await server.connect(transport);
+    } else if (req.method === 'GET' && !sessionId) {
+      // GET without session - client wants to establish SSE stream
+      // For stateless mode or initial connection, create new transport
+      transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => crypto.randomUUID(),
+        onsessioninitialized: (newSessionId) => {
+          console.log(`Session initialized via GET with ID: ${newSessionId}`);
+          transports.set(newSessionId, transport);
+        }
+      });
+
+      transport.onclose = () => {
+        const sid = transport.sessionId;
+        if (sid && transports.has(sid)) {
+          transports.delete(sid);
+        }
+      };
+
+      const server = createMcpServer();
+      await server.connect(transport);
+    } else {
+      // Invalid request
+      res.status(400).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32000,
+          message: 'Bad Request: No valid session ID provided'
+        },
+        id: null
+      });
+      return;
+    }
+
+    // Handle the request with the transport
+    await transport.handleRequest(req, res, req.body);
+  } catch (error) {
+    console.error('Error handling /sse request:', error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32603,
+          message: 'Internal server error'
+        },
+        id: null
+      });
+    }
+  }
+});
+
+// Also support /mcp endpoint for clients that prefer that path
+app.all('/mcp-stream', async (req, res) => {
+  // Forward to /sse handler logic
+  req.url = '/sse';
+  app._router.handle(req, res, () => {
+    res.status(404).json({ error: 'Not found' });
   });
-
-  server.connect(transport);
-});
-
-// POST /sse - handle messages from Poke
-app.post('/sse', (req, res) => {
-  const sessionId = req.query.sessionId;
-  const transport = transports.get(sessionId);
-
-  if (transport) {
-    transport.handlePostMessage(req, res);
-  } else {
-    res.status(404).json({ error: 'Session not found' });
-  }
-});
-
-// Messages endpoint for SSE client-to-server (legacy/alternate path)
-app.post('/messages', (req, res) => {
-  const sessionId = req.query.sessionId;
-  const transport = transports.get(sessionId);
-
-  if (transport) {
-    transport.handlePostMessage(req, res);
-  } else {
-    res.status(404).json({ error: 'Session not found' });
-  }
 });
 
 // OAuth discovery endpoints for MCP clients
