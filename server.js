@@ -15,7 +15,21 @@ const { isInitializeRequest, CallToolRequestSchema, ListToolsRequestSchema } = r
 
 const app = express();
 const PORT = process.env.PORT || 5001;
-const NITTER_INSTANCE = process.env.NITTER_INSTANCE || 'nitter.poast.org';
+
+// Primary Nitter instance from environment, with fallback list
+const PRIMARY_NITTER_INSTANCE = process.env.NITTER_INSTANCE || 'nitter.poast.org';
+
+// List of Nitter instances to try (in order of preference)
+const NITTER_INSTANCES = [
+  PRIMARY_NITTER_INSTANCE,
+  'xcancel.com',
+  'nitter.privacydev.net',
+  'nitter.lucabased.xyz',
+  'nitter.woodland.cafe'
+].filter((v, i, a) => a.indexOf(v) === i); // Remove duplicates
+
+// For backwards compatibility
+const NITTER_INSTANCE = PRIMARY_NITTER_INSTANCE;
 
 // Middleware
 app.use(helmet());
@@ -26,20 +40,21 @@ app.use(morgan('combined'));
 /**
  * Transform X/Twitter URL to Nitter URL
  * @param {string} url - Original X/Twitter URL
+ * @param {string} [instance] - Optional Nitter instance to use (defaults to PRIMARY_NITTER_INSTANCE)
  * @returns {string} - Transformed Nitter URL
  */
-function transformToNitter(url) {
+function transformToNitter(url, instance = PRIMARY_NITTER_INSTANCE) {
   try {
     const urlObj = new URL(url);
-    
+
     // Check if it's a Twitter/X URL
     if (!urlObj.hostname.includes('twitter.com') && !urlObj.hostname.includes('x.com')) {
       throw new Error('Not a valid Twitter/X URL');
     }
-    
+
     // Replace hostname with Nitter instance
-    urlObj.hostname = NITTER_INSTANCE;
-    
+    urlObj.hostname = instance;
+
     return urlObj.toString();
   } catch (error) {
     throw new Error(`URL transformation failed: ${error.message}`);
@@ -85,24 +100,68 @@ function parseTweetContent(html) {
   };
 }
 
+// Browser-like headers for requests
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Accept-Encoding': 'gzip, deflate, br',
+  'Cache-Control': 'no-cache',
+  'Pragma': 'no-cache',
+  'Sec-Fetch-Dest': 'document',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-Site': 'none',
+  'Sec-Fetch-User': '?1',
+  'Upgrade-Insecure-Requests': '1'
+};
+
 /**
- * Fetch tweet content from Nitter
+ * Fetch tweet content from a single Nitter instance
  * @param {string} nitterUrl - Nitter URL to fetch
  * @returns {object} - Fetched and parsed content
  */
-async function fetchTweetContent(nitterUrl) {
-  try {
-    const response = await axios.get(nitterUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      },
-      timeout: 10000
-    });
-    
-    return parseTweetContent(response.data);
-  } catch (error) {
-    throw new Error(`Failed to fetch content: ${error.message}`);
+async function fetchFromInstance(nitterUrl) {
+  const response = await axios.get(nitterUrl, {
+    headers: BROWSER_HEADERS,
+    timeout: 10000,
+    maxRedirects: 5
+  });
+
+  return parseTweetContent(response.data);
+}
+
+/**
+ * Fetch tweet content from Nitter with fallback instances
+ * @param {string} originalUrl - Original X/Twitter URL
+ * @returns {object} - Fetched and parsed content with instance info
+ */
+async function fetchTweetContent(originalUrl) {
+  const errors = [];
+
+  for (const instance of NITTER_INSTANCES) {
+    try {
+      const nitterUrl = transformToNitter(originalUrl, instance);
+      console.log(`Trying Nitter instance: ${instance}`);
+      const content = await fetchFromInstance(nitterUrl);
+
+      if (content.hasContent) {
+        console.log(`Successfully fetched from: ${instance}`);
+        return { ...content, nitterInstance: instance, nitterUrl };
+      } else {
+        errors.push({ instance, error: 'No content found' });
+      }
+    } catch (error) {
+      const errorMsg = error.response?.status
+        ? `HTTP ${error.response.status}`
+        : error.message;
+      console.log(`Failed on ${instance}: ${errorMsg}`);
+      errors.push({ instance, error: errorMsg });
+    }
   }
+
+  // All instances failed
+  const errorSummary = errors.map(e => `${e.instance}: ${e.error}`).join('; ');
+  throw new Error(`All Nitter instances failed: ${errorSummary}`);
 }
 
 // Routes
@@ -114,7 +173,8 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    nitterInstance: NITTER_INSTANCE
+    primaryInstance: PRIMARY_NITTER_INSTANCE,
+    availableInstances: NITTER_INSTANCES
   });
 });
 
@@ -180,20 +240,20 @@ app.get('/fetch', async (req, res) => {
   }
   
   try {
-    const nitterUrl = transformToNitter(url);
-    const content = await fetchTweetContent(nitterUrl);
-    
+    const content = await fetchTweetContent(url);
+
     if (!content.hasContent) {
       return res.status(404).json({
         success: false,
         error: 'Tweet not found or could not be parsed'
       });
     }
-    
+
     res.json({
       success: true,
       originalUrl: url,
-      nitterUrl: nitterUrl,
+      nitterUrl: content.nitterUrl,
+      nitterInstance: content.nitterInstance,
       content: content
     });
   } catch (error) {
@@ -221,20 +281,20 @@ app.post('/mcp', async (req, res) => {
     switch (method) {
       case 'fetch_tweet': {
         const { url } = params || {};
-        
+
         if (!url) {
           return res.status(400).json({
             error: 'URL parameter is required'
           });
         }
-        
-        const nitterUrl = transformToNitter(url);
-        const content = await fetchTweetContent(nitterUrl);
-        
+
+        const content = await fetchTweetContent(url);
+
         res.json({
           result: {
             originalUrl: url,
-            nitterUrl: nitterUrl,
+            nitterUrl: content.nitterUrl,
+            nitterInstance: content.nitterInstance,
             content: content
           }
         });
@@ -337,11 +397,9 @@ function createMcpServer() {
 
     try {
       if (name === 'fetch_tweet') {
-        console.log('Transforming URL:', url);
-        const nitterUrl = transformToNitter(url);
-        console.log('Fetching from Nitter URL:', nitterUrl);
-        const content = await fetchTweetContent(nitterUrl);
-        console.log('Successfully fetched content');
+        console.log('Fetching tweet from URL:', url);
+        const content = await fetchTweetContent(url);
+        console.log(`Successfully fetched from: ${content.nitterInstance}`);
         return {
           content: [{ type: 'text', text: JSON.stringify(content, null, 2) }]
         };
