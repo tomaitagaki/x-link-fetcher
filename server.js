@@ -4,7 +4,12 @@ const cheerio = require('cheerio');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const crypto = require('crypto');
 require('dotenv').config();
+
+// MCP SDK imports for SSE endpoint
+const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
+const { SSEServerTransport } = require('@modelcontextprotocol/sdk/server/sse.js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -123,7 +128,9 @@ app.get('/', (req, res) => {
       health: '/health',
       fetch: '/fetch?url=<twitter_url>',
       transform: '/transform?url=<twitter_url>',
-      mcp: '/mcp (POST)'
+      mcp: '/mcp (POST)',
+      sse: '/sse (GET) - MCP SSE endpoint for Poke integration',
+      messages: '/messages (POST) - SSE client-to-server messages'
     },
     repository: 'https://github.com/tomaitagaki/x-link-fetcher',
     documentation: 'https://github.com/tomaitagaki/x-link-fetcher#readme'
@@ -263,6 +270,60 @@ app.post('/mcp', async (req, res) => {
     res.status(500).json({
       error: error.message
     });
+  }
+});
+
+// MCP SSE endpoint for Poke integration
+// Store active transports
+const transports = new Map();
+
+// SSE endpoint - Poke connects here
+app.get('/sse', (req, res) => {
+  const transport = new SSEServerTransport('/messages', res);
+  const server = new McpServer({
+    name: 'x-link-fetcher',
+    version: '1.0.0'
+  });
+
+  // Register tools
+  server.tool('fetch_tweet', 'Fetch and parse tweet content from X/Twitter URL', {
+    url: { type: 'string', description: 'X/Twitter URL to fetch' }
+  }, async ({ url }) => {
+    const nitterUrl = transformToNitter(url);
+    const content = await fetchTweetContent(nitterUrl);
+    return {
+      content: [{ type: 'text', text: JSON.stringify(content, null, 2) }]
+    };
+  });
+
+  server.tool('transform_url', 'Transform X/Twitter URL to Nitter URL', {
+    url: { type: 'string', description: 'X/Twitter URL to transform' }
+  }, async ({ url }) => {
+    const nitterUrl = transformToNitter(url);
+    return {
+      content: [{ type: 'text', text: JSON.stringify({ originalUrl: url, nitterUrl }, null, 2) }]
+    };
+  });
+
+  const sessionId = crypto.randomUUID();
+  transports.set(sessionId, transport);
+
+  res.on('close', () => {
+    transports.delete(sessionId);
+  });
+
+  server.connect(transport);
+});
+
+// Messages endpoint for SSE client-to-server
+app.post('/messages', (req, res) => {
+  const sessionId = req.query.sessionId;
+  const transport = transports.get(sessionId);
+
+  if (transport) {
+    transport.handlePostMessage(req, res);
+  } else {
+    res.status(404).json({ error: 'Session not found' });
   }
 });
 
