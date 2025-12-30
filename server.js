@@ -274,12 +274,11 @@ app.post('/mcp', async (req, res) => {
 });
 
 // MCP SSE endpoint for Poke integration
-// Store active transports
+// Store active transports by session ID
 const transports = new Map();
 
-// SSE endpoint - Poke connects here
-app.get('/sse', (req, res) => {
-  const transport = new SSEServerTransport('/messages', res);
+// Helper to create an MCP server with tools
+function createMcpServer() {
   const server = new McpServer({
     name: 'x-link-fetcher',
     version: '1.0.0'
@@ -305,6 +304,15 @@ app.get('/sse', (req, res) => {
     };
   });
 
+  return server;
+}
+
+// SSE endpoint - GET establishes SSE connection, POST sends messages
+app.get('/sse', (req, res) => {
+  // Use /sse as the message endpoint (Poke posts to same path)
+  const transport = new SSEServerTransport('/sse', res);
+  const server = createMcpServer();
+
   const sessionId = crypto.randomUUID();
   transports.set(sessionId, transport);
 
@@ -315,7 +323,19 @@ app.get('/sse', (req, res) => {
   server.connect(transport);
 });
 
-// Messages endpoint for SSE client-to-server
+// POST /sse - handle messages from Poke
+app.post('/sse', (req, res) => {
+  const sessionId = req.query.sessionId;
+  const transport = transports.get(sessionId);
+
+  if (transport) {
+    transport.handlePostMessage(req, res);
+  } else {
+    res.status(404).json({ error: 'Session not found' });
+  }
+});
+
+// Messages endpoint for SSE client-to-server (legacy/alternate path)
 app.post('/messages', (req, res) => {
   const sessionId = req.query.sessionId;
   const transport = transports.get(sessionId);
@@ -325,6 +345,25 @@ app.post('/messages', (req, res) => {
   } else {
     res.status(404).json({ error: 'Session not found' });
   }
+});
+
+// OAuth discovery endpoints for MCP clients
+// For a PUBLIC server (no auth required), return 404 to indicate no OAuth config
+// This tells Poke that authentication is not required
+
+app.get('/.well-known/oauth-authorization-server', (req, res) => {
+  // Return 404 to indicate no OAuth server configured (public access)
+  res.status(404).json({ error: 'OAuth not configured - public access' });
+});
+
+app.get('/.well-known/oauth-protected-resource', (req, res) => {
+  // Return 404 to indicate resource is not OAuth protected
+  res.status(404).json({ error: 'Resource not protected - public access' });
+});
+
+app.get('/.well-known/oauth-protected-resource/:path', (req, res) => {
+  // Handle path-specific OAuth discovery (e.g., /sse)
+  res.status(404).json({ error: 'Resource not protected - public access' });
 });
 
 // Error handling middleware
