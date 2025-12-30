@@ -11,7 +11,7 @@ require('dotenv').config();
 // MCP SDK imports for Streamable HTTP transport
 const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
-const { isInitializeRequest } = require('@modelcontextprotocol/sdk/types.js');
+const { isInitializeRequest, CallToolRequestSchema, ListToolsRequestSchema } = require('@modelcontextprotocol/sdk/types.js');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -279,31 +279,64 @@ app.post('/mcp', async (req, res) => {
 const transports = new Map();
 
 // Helper to create an MCP server with tools
+// Uses low-level setRequestHandler to properly receive tool arguments
 function createMcpServer() {
   const server = new McpServer({
     name: 'x-link-fetcher',
     version: '1.0.0'
+  }, {
+    capabilities: {
+      tools: {}
+    }
   });
 
-  // Register tools with Zod schemas (MCP SDK v1.x expects Zod, not raw JSON Schema)
-  server.tool(
-    'fetch_tweet',
-    'Fetch and parse tweet content from X/Twitter URL',
-    {
-      url: z.string().describe('X/Twitter URL to fetch (e.g., https://x.com/user/status/123)')
-    },
-    async ({ url }) => {
-      console.log('fetch_tweet called with url:', url);
+  // List available tools - using raw JSON Schema for inputSchema
+  server.server.setRequestHandler(ListToolsRequestSchema, async () => {
+    return {
+      tools: [
+        {
+          name: 'fetch_tweet',
+          description: 'Fetch and parse tweet content from X/Twitter URL',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              url: { type: 'string', description: 'X/Twitter URL to fetch (e.g., https://x.com/user/status/123)' }
+            },
+            required: ['url']
+          }
+        },
+        {
+          name: 'transform_url',
+          description: 'Transform X/Twitter URL to Nitter URL',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              url: { type: 'string', description: 'X/Twitter URL to transform (e.g., https://x.com/user/status/123)' }
+            },
+            required: ['url']
+          }
+        }
+      ]
+    };
+  });
 
-      if (!url) {
-        console.error('URL is undefined!');
-        return {
-          content: [{ type: 'text', text: 'Error: URL parameter is required' }],
-          isError: true
-        };
-      }
+  // Handle tool calls - directly access request.params.arguments
+  server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params;
+    console.log(`Tool called: ${name}, args:`, JSON.stringify(args));
 
-      try {
+    const url = args?.url;
+
+    if (!url) {
+      console.error('URL is undefined! Full request.params:', JSON.stringify(request.params));
+      return {
+        content: [{ type: 'text', text: 'Error: URL parameter is required' }],
+        isError: true
+      };
+    }
+
+    try {
+      if (name === 'fetch_tweet') {
         console.log('Transforming URL:', url);
         const nitterUrl = transformToNitter(url);
         console.log('Fetching from Nitter URL:', nitterUrl);
@@ -312,49 +345,27 @@ function createMcpServer() {
         return {
           content: [{ type: 'text', text: JSON.stringify(content, null, 2) }]
         };
-      } catch (error) {
-        console.error('fetch_tweet error:', error.stack || error.message);
-        return {
-          content: [{ type: 'text', text: `Error: ${error.message}` }],
-          isError: true
-        };
-      }
-    }
-  );
-
-  server.tool(
-    'transform_url',
-    'Transform X/Twitter URL to Nitter URL',
-    {
-      url: z.string().describe('X/Twitter URL to transform (e.g., https://x.com/user/status/123)')
-    },
-    async ({ url }) => {
-      console.log('transform_url called with url:', url);
-
-      if (!url) {
-        console.error('URL is undefined!');
-        return {
-          content: [{ type: 'text', text: 'Error: URL parameter is required' }],
-          isError: true
-        };
-      }
-
-      try {
+      } else if (name === 'transform_url') {
         console.log('Transforming URL:', url);
         const nitterUrl = transformToNitter(url);
         console.log('Transformed to:', nitterUrl);
         return {
           content: [{ type: 'text', text: JSON.stringify({ originalUrl: url, nitterUrl }, null, 2) }]
         };
-      } catch (error) {
-        console.error('transform_url error:', error.stack || error.message);
+      } else {
         return {
-          content: [{ type: 'text', text: `Error: ${error.message}` }],
+          content: [{ type: 'text', text: `Unknown tool: ${name}` }],
           isError: true
         };
       }
+    } catch (error) {
+      console.error(`${name} error:`, error.stack || error.message);
+      return {
+        content: [{ type: 'text', text: `Error: ${error.message}` }],
+        isError: true
+      };
     }
-  );
+  });
 
   return server;
 }
