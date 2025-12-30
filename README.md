@@ -33,7 +33,7 @@ npm install
 npm start
 ```
 
-The server will start on `http://localhost:3000`
+The server will start on `http://localhost:5001`
 
 ### Development Mode
 
@@ -48,7 +48,7 @@ npm run dev
 **Fetch Tweet Content:**
 
 ```bash
-curl "http://localhost:3000/fetch?url=https://x.com/user/status/1234567890"
+curl "http://localhost:5001/fetch?url=https://x.com/user/status/1234567890"
 ```
 
 **Response:**
@@ -74,8 +74,8 @@ Add to your Poke configuration file (`~/.poke/config.json` or similar):
 {
   "mcpServers": {
     "x-link-fetcher": {
-      "url": "http://localhost:3000/mcp",
-      "type": "http"
+      "url": "http://localhost:5001/sse",
+      "type": "streamable-http"
     }
   }
 }
@@ -87,12 +87,18 @@ Or if running remotely:
 {
   "mcpServers": {
     "x-link-fetcher": {
-      "url": "https://your-deployment.vercel.app/mcp",
-      "type": "http"
+      "url": "https://your-deployment.vercel.app/sse",
+      "type": "streamable-http"
     }
   }
 }
 ```
+
+**Available MCP Tools:**
+- `fetch_tweet` - Fetch and parse tweet content from X/Twitter URL
+- `transform_url` - Transform X/Twitter URL to Nitter URL
+
+Both tools require a `url` parameter (e.g., `https://x.com/user/status/123`).
 
 ## API Endpoints
 
@@ -128,9 +134,24 @@ GET /transform?url=https://x.com/user/status/123
 }
 ```
 
-### POST `/mcp`
+### GET/POST `/sse`
 
-MCP server endpoint for Poke integration.
+MCP Streamable HTTP endpoint for Poke and MCP client integration. This is the recommended endpoint for MCP clients.
+
+**Supported MCP Tools:**
+- `fetch_tweet` - Fetch and parse tweet content
+- `transform_url` - Transform X/Twitter URL to Nitter URL
+
+**Tool Parameters:**
+```json
+{
+  "url": "https://x.com/user/status/123"
+}
+```
+
+### POST `/mcp` (Legacy)
+
+Legacy MCP server endpoint (simple JSON-RPC style).
 
 **Body:**
 ```json
@@ -199,7 +220,7 @@ git push heroku main
 
 ### Environment Variables
 
-- `PORT` - Server port (default: 3000)
+- `PORT` - Server port (default: 5001)
 - `NITTER_INSTANCE` - Nitter instance to use (default: nitter.poast.org)
 - `NODE_ENV` - Environment (development/production)
 
@@ -248,7 +269,7 @@ Or in your deployment platform's environment variables.
 const axios = require('axios');
 
 async function fetchTweet(url) {
-  const response = await axios.get('http://localhost:3000/fetch', {
+  const response = await axios.get('http://localhost:5001/fetch', {
     params: { url }
   });
   return response.data;
@@ -265,7 +286,7 @@ fetchTweet('https://x.com/user/status/123')
 import requests
 
 def fetch_tweet(url):
-    response = requests.get('http://localhost:3000/fetch', params={'url': url})
+    response = requests.get('http://localhost:5001/fetch', params={'url': url})
     return response.json()
 
 data = fetch_tweet('https://x.com/user/status/123')
@@ -276,13 +297,13 @@ print(data)
 
 ```bash
 # Fetch tweet
-curl "http://localhost:3000/fetch?url=https://x.com/user/status/123"
+curl "http://localhost:5001/fetch?url=https://x.com/user/status/123"
 
 # Transform URL only
-curl "http://localhost:3000/transform?url=https://x.com/user/status/123"
+curl "http://localhost:5001/transform?url=https://x.com/user/status/123"
 
 # Health check
-curl http://localhost:3000/health
+curl http://localhost:5001/health
 ```
 
 ## Troubleshooting
